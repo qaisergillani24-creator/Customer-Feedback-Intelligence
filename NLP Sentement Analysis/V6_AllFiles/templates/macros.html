@@ -1,0 +1,18 @@
+{% macro badge(s) -%}
+  {% if s == "positive" %}<span class="badge text-bg-success">positive</span>
+  {% elif s == "negative" %}<span class="badge text-bg-danger">negative</span>
+  {% elif s == "neutral" %}<span class="badge text-bg-secondary">neutral</span>
+  {% else %}<span class="badge text-bg-warning">unknown</span>{% endif %}
+{%- endmacro %}
+
+{% macro status_badge(s) -%}
+  {% if s == "Strong" %}<span class="badge text-bg-success">Strong</span>
+  {% elif s == "At risk" %}<span class="badge text-bg-danger">At risk</span>
+  {% else %}<span class="badge text-bg-secondary">Stable</span>{% endif %}
+{%- endmacro %}
+
+{% macro priority_badge(p) -%}
+  {% if p == "High" %}<span class="badge text-bg-danger">High</span>
+  {% elif p == "Low" %}<span class="badge text-bg-secondary">Low</span>
+  {% else %}<span class="badge text-bg-warning">Medium</span>{% endif %}
+{%- endmacro %}

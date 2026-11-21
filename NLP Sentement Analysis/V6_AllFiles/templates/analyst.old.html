@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Business Analyst</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    #log { max-height: 55vh; overflow-y: auto; }
+    .msg { white-space: pre-wrap; }
+  </style>
+</head>
+<body class="bg-light">
+<div class="container py-4" style="max-width: 980px;">
+  <div class="d-flex justify-content-between align-items-center mb-1">
+    <h1 class="h3 mb-0">AI Business Analyst</h1>
+    <a href="/" class="btn btn-outline-secondary btn-sm">Back to dashboard</a>
+  </div>
+  <p class="text-muted">Ask in English or Roman Urdu. The agent runs Python tools on your analysed data, and every number comes from a tool.</p>
+
+  {% if not has_data %}
+  <div class="alert alert-warning">No analysed data yet. Go to the dashboard, upload a CSV in "CSV batch analysis", then come back.</div>
+  {% endif %}
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <div id="log" class="mb-3">
+        {% for m in history %}
+        <div class="mb-2">
+          <span class="badge text-bg-{{ 'primary' if m.role == 'user' else 'dark' }}">{{ 'You' if m.role == 'user' else 'Analyst' }}</span>
+          <div class="msg">{{ m.text }}</div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="mb-2 d-flex flex-wrap gap-2">
+        <button type="button" class="btn btn-outline-primary btn-sm example" data-q="Which product has the most negative feedback, what are its main complaints, and what should we fix first?">Worst product and fixes</button>
+        <button type="button" class="btn btn-outline-primary btn-sm example" data-q="Show reviews about late delivery and recommend actions with evidence.">Late delivery evidence</button>
+        <button type="button" class="btn btn-outline-primary btn-sm example" data-q="What is the average net score across all products?">Average net score</button>
+      </div>
+
+      <div class="input-group">
+        <input id="q" class="form-control" maxlength="500" placeholder="Ask a question about your feedback...">
+        <button id="send" class="btn btn-primary" type="button">Ask</button>
+        <button id="clear" class="btn btn-outline-secondary" type="button">Clear chat</button>
+      </div>
+      <div id="status" class="form-text"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const log = document.getElementById("log");
+  const input = document.getElementById("q");
+  const sendBtn = document.getElementById("send");
+  const statusEl = document.getElementById("status");
+
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function addMsg(role, text) {
+    const wrap = el("div", "mb-2");
+    const label = role === "user" ? "You" : (role === "error" ? "Error" : "Analyst");
+    const color = role === "user" ? "primary" : (role === "error" ? "danger" : "dark");
+    wrap.appendChild(el("span", "badge text-bg-" + color, label));
+    wrap.appendChild(el("div", "msg", text));
+    log.appendChild(wrap);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function addTrace(result) {
+    const box = el("div", "mb-3 small");
+    box.appendChild(el("div", "text-muted mb-1",
+      "Execution trace: " + result.tool_calls + " tool call(s), " + result.rounds +
+      " round(s), " + result.total_ms + " ms total"));
+    if (result.trace.length) {
+      const wrap = el("div", "table-responsive");
+      const table = el("table", "table table-sm table-bordered align-middle mb-0");
+      const thead = el("thead");
+      const hr = el("tr");
+      ["Round", "Tool", "Arguments", "Status", "Duration (ms)", "Result preview"].forEach(function (h) {
+        hr.appendChild(el("th", "", h));
+      });
+      thead.appendChild(hr);
+      table.appendChild(thead);
+      const tbody = el("tbody");
+      result.trace.forEach(function (t) {
+        const tr = el("tr");
+        tr.appendChild(el("td", "", String(t.round)));
+        tr.appendChild(el("td", "", t.tool));
+        tr.appendChild(el("td", "text-break", JSON.stringify(t.args)));
+        const st = el("td");
+        const color = t.status === "ok" ? "success" : (t.status === "skipped" ? "warning" : "danger");
+        st.appendChild(el("span", "badge text-bg-" + color, t.status));
+        tr.appendChild(st);
+        tr.appendChild(el("td", "", String(t.duration_ms)));
+        tr.appendChild(el("td", "text-break", t.preview));
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      wrap.appendChild(table);
+      box.appendChild(wrap);
+    }
+    log.appendChild(box);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async function ask(question) {
+    question = (question || "").trim();
+    if (!question) { statusEl.textContent = "Please type a question."; return; }
+    addMsg("user", question);
+    input.value = "";
+    sendBtn.disabled = true;
+    statusEl.textContent = "Thinking... this can take 10 to 40 seconds.";
+    try {
+      const r = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: question })
+      });
+      let data = null;
+      try { data = await r.json(); } catch (e) { data = null; }
+      if (!r.ok || !data) {
+        addMsg("error", (data && data.error) || "No valid response from the server.");
+      } else {
+        addMsg("model", data.answer);
+        addTrace(data);
+      }
+    } catch (e) {
+      addMsg("error", "Could not reach the server.");
+    }
+    sendBtn.disabled = false;
+    statusEl.textContent = "";
+    input.focus();
+  }
+
+  sendBtn.addEventListener("click", function () { ask(input.value); });
+  input.addEventListener("keydown", function (e) { if (e.key === "Enter") ask(input.value); });
+  document.querySelectorAll(".example").forEach(function (b) {
+    b.addEventListener("click", function () { ask(b.dataset.q); });
+  });
+  document.getElementById("clear").addEventListener("click", async function () {
+    try { await fetch("/api/clear", { method: "POST" }); } catch (e) {}
+    log.replaceChildren();
+    statusEl.textContent = "Chat cleared.";
+  });
+</script>
+</body>
+</html>

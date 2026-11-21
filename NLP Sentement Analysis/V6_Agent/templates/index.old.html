@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Customer Feedback Intelligence</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+{% macro badge(s) -%}
+  {% if s == "positive" %}<span class="badge text-bg-success">positive</span>
+  {% elif s == "negative" %}<span class="badge text-bg-danger">negative</span>
+  {% elif s == "neutral" %}<span class="badge text-bg-secondary">neutral</span>
+  {% else %}<span class="badge text-bg-warning">unknown</span>{% endif %}
+{%- endmacro %}
+{% macro status_badge(s) -%}
+  {% if s == "Strong" %}<span class="badge text-bg-success">Strong</span>
+  {% elif s == "At risk" %}<span class="badge text-bg-danger">At risk</span>
+  {% else %}<span class="badge text-bg-secondary">Stable</span>{% endif %}
+{%- endmacro %}
+{% macro priority_badge(p) -%}
+  {% if p == "High" %}<span class="badge text-bg-danger">High</span>
+  {% elif p == "Low" %}<span class="badge text-bg-secondary">Low</span>
+  {% else %}<span class="badge text-bg-warning">Medium</span>{% endif %}
+{%- endmacro %}
+<div class="container py-4">
+  <h1 class="h3 mb-1">Customer Feedback Intelligence</h1>
+  <p class="text-muted">Analyse one review, or upload a CSV with columns customer_id, product, feedback</p>
+
+  <ul class="nav nav-pills mb-3">
+    <li class="nav-item">
+      <button class="nav-link {{ 'active' if active_tab == 'single' else '' }}" data-bs-toggle="pill" data-bs-target="#tab-single" type="button">Single review</button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link {{ 'active' if active_tab == 'csv' else '' }}" data-bs-toggle="pill" data-bs-target="#tab-csv" type="button">CSV batch analysis</button>
+    </li>
+  </ul>
+
+  <div class="tab-content">
+
+    <div class="tab-pane fade {{ 'show active' if active_tab == 'single' else '' }}" id="tab-single">
+      <form method="post" class="card card-body shadow-sm mb-4">
+        <input type="hidden" name="mode" value="single">
+        <label for="review" class="form-label">Customer review</label>
+        <textarea id="review" name="review" rows="4" maxlength="2000" class="form-control mb-3"
+                  placeholder="Type or paste a customer review here...">{{ review }}</textarea>
+        <button type="submit" class="btn btn-primary">Analyse review</button>
+      </form>
+
+      {% if single_error %}<div class="alert alert-danger">{{ single_error }}</div>{% endif %}
+
+      {% if single_result %}
+      <div class="card shadow-sm mb-4">
+        <div class="card-body">
+          <h2 class="h5">Result</h2>
+          <p class="mb-2">Sentiment: {{ badge(single_result.sentiment) }}</p>
+          <p class="mb-2">Confidence: {{ (single_result.confidence * 100) | round | int }}%</p>
+          <p class="mb-1">Key phrases:</p>
+          {% if single_result.key_phrases %}
+            <ul class="mb-0">
+              {% for phrase in single_result.key_phrases %}<li>{{ phrase }}</li>{% endfor %}
+            </ul>
+          {% else %}
+            <p class="text-muted mb-0">No key phrases found.</p>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="tab-pane fade {{ 'show active' if active_tab == 'csv' else '' }}" id="tab-csv">
+      <form method="post" enctype="multipart/form-data" class="card card-body shadow-sm mb-4">
+        <input type="hidden" name="mode" value="csv">
+        <div class="row g-2 align-items-center">
+          <div class="col-md-9">
+            <input type="file" name="file" accept=".csv" class="form-control">
+          </div>
+          <div class="col-md-3 d-grid">
+            <button type="submit" class="btn btn-primary">Analyse CSV</button>
+          </div>
+        </div>
+        <div class="form-text mt-2">Use sample (fake) reviews only. Max 200 reviews, 1 MB. Analysis can take 15 to 40 seconds.</div>
+      </form>
+
+      {% if csv_error %}<div class="alert alert-danger">{{ csv_error }}</div>{% endif %}
+      {% if warning %}<div class="alert alert-warning">{{ warning }}</div>{% endif %}
+
+      {% if kpis %}
+      <div class="row g-3 mb-4">
+        <div class="col-6 col-md-3"><div class="card card-body text-center shadow-sm">
+          <div class="text-muted small">Total reviews</div><div class="h3 mb-0">{{ kpis.total }}</div></div></div>
+        <div class="col-6 col-md-3"><div class="card card-body text-center shadow-sm">
+          <div class="text-success small">Positive</div><div class="h3 mb-0">{{ kpis.positive }}</div>
+          <div class="small">{{ kpis.positive_pct }}%</div></div></div>
+        <div class="col-6 col-md-3"><div class="card card-body text-center shadow-sm">
+          <div class="text-secondary small">Neutral</div><div class="h3 mb-0">{{ kpis.neutral }}</div>
+          <div class="small">{{ kpis.neutral_pct }}%</div></div></div>
+        <div class="col-6 col-md-3"><div class="card card-body text-center shadow-sm">
+          <div class="text-danger small">Negative</div><div class="h3 mb-0">{{ kpis.negative }}</div>
+          <div class="small">{{ kpis.negative_pct }}%</div></div></div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-5"><div class="card card-body shadow-sm">
+          <h2 class="h6">Sentiment split</h2><canvas id="pie"></canvas></div></div>
+        <div class="col-md-7"><div class="card card-body shadow-sm">
+          <h2 class="h6">Sentiment by product</h2><canvas id="bar"></canvas></div></div>
+      </div>
+
+      <div class="card shadow-sm mb-4">
+        <div class="card-body">
+          <h2 class="h5">Product performance</h2>
+          <p class="text-muted small mb-2">Net score = (positive - negative) / analysed reviews x 100. Calculated in Python.</p>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead><tr><th>Rank</th><th>Product</th><th>Reviews</th><th>Positive</th><th>Neutral</th><th>Negative</th><th>Net score</th><th>Status</th><th>Top complaint</th></tr></thead>
+              <tbody>
+              {% for p in perf %}
+                <tr>
+                  <td>{{ p.rank }}</td><td>{{ p.product }}</td><td>{{ p.reviews }}</td>
+                  <td>{{ p.positive }}</td><td>{{ p.neutral }}</td><td>{{ p.negative }}</td>
+                  <td>{{ p.net_score }}</td><td>{{ status_badge(p.status) }}</td><td>{{ p.top_complaint }}</td>
+                </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-7"><div class="card card-body shadow-sm">
+          <h2 class="h6">Complaint categories (negative reviews)</h2>
+          {% if comp %}<canvas id="comp"></canvas>{% else %}<p class="text-muted mb-0">No complaints to show.</p>{% endif %}
+        </div></div>
+        <div class="col-md-5"><div class="card card-body shadow-sm">
+          <h2 class="h6">Complaint breakdown</h2>
+          {% if comp %}
+          <table class="table table-sm mb-0">
+            <thead><tr><th>Category</th><th>Count</th><th>%</th></tr></thead>
+            <tbody>
+            {% for c in comp %}<tr><td>{{ c.category }}</td><td>{{ c.count }}</td><td>{{ c.pct }}%</td></tr>{% endfor %}
+            </tbody>
+          </table>
+          {% else %}<p class="text-muted mb-0">No complaints to show.</p>{% endif %}
+        </div></div>
+      </div>
+
+      <div class="card shadow-sm mb-4" id="report">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h2 class="h5 mb-0">Executive report (AI)</h2>
+            <form method="post" action="/report#report" class="mb-0">
+              <button type="submit" class="btn btn-dark btn-sm">{{ 'Regenerate report' if report else 'Generate executive report' }}</button>
+            </form>
+          </div>
+          <p class="text-muted small">All numbers come from Python. The AI only explains them. It can take 5 to 15 seconds.</p>
+          {% if report_error %}<div class="alert alert-danger">{{ report_error }}</div>{% endif %}
+          {% if report %}
+            <h3 class="h6">Summary</h3>
+            <p>{{ report.summary }}</p>
+            {% if report.key_findings %}
+            <h3 class="h6">Key findings</h3>
+            <ul>{% for f in report.key_findings %}<li>{{ f }}</li>{% endfor %}</ul>
+            {% endif %}
+            {% if report.recommendations %}
+            <h3 class="h6">Recommendations</h3>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead><tr><th>Priority</th><th>Product</th><th>Action</th><th>Evidence</th></tr></thead>
+                <tbody>
+                {% for r in report.recommendations %}
+                  <tr><td>{{ priority_badge(r.priority) }}</td><td>{{ r.product }}</td><td>{{ r.action }}</td><td>{{ r.evidence }}</td></tr>
+                {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% endif %}
+          {% elif not report_error %}
+            <p class="text-muted mb-0">No report yet. Click the button above.</p>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card shadow-sm mb-4">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h2 class="h5 mb-0">Results</h2>
+            <a href="/download" class="btn btn-outline-success btn-sm">Download results (CSV)</a>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-striped align-middle mb-0">
+              <thead><tr><th>ID</th><th>Product</th><th>Feedback</th><th>Sentiment</th><th>Confidence</th><th>Key phrases</th><th>Complaint category</th></tr></thead>
+              <tbody>
+              {% for r in rows %}
+                <tr>
+                  <td>{{ r.customer_id }}</td>
+                  <td>{{ r.product }}</td>
+                  <td>{{ r.feedback }}</td>
+                  <td>{{ badge(r.sentiment) }}</td>
+                  <td>{{ (r.confidence * 100) | round | int }}%</td>
+                  <td>{{ r.key_phrases }}</td>
+                  <td>{{ r.complaint_category }}</td>
+                </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+{% if kpis %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+  const chartData = {{ chart | tojson }};
+  new Chart(document.getElementById("pie"), {
+    type: "doughnut",
+    data: {
+      labels: ["Positive", "Neutral", "Negative"],
+      datasets: [{ data: chartData.sentiment, backgroundColor: ["#198754", "#6c757d", "#dc3545"] }]
+    },
+    options: { plugins: { legend: { position: "bottom" } } }
+  });
+  new Chart(document.getElementById("bar"), {
+    type: "bar",
+    data: {
+      labels: chartData.products,
+      datasets: [
+        { label: "Positive", data: chartData.positive, backgroundColor: "#198754" },
+        { label: "Neutral", data: chartData.neutral, backgroundColor: "#6c757d" },
+        { label: "Negative", data: chartData.negative, backgroundColor: "#dc3545" }
+      ]
+    },
+    options: {
+      scales: {
+        x: { stacked: true },
+        y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } }
+      },
+      plugins: { legend: { position: "bottom" } }
+    }
+  });
+  const compEl = document.getElementById("comp");
+  if (compEl) {
+    new Chart(compEl, {
+      type: "bar",
+      data: {
+        labels: chartData.complaint_labels,
+        datasets: [{ label: "Complaints", data: chartData.complaint_counts, backgroundColor: "#dc3545" }]
+      },
+      options: {
+        indexAxis: "y",
+        scales: { x: { beginAtZero: true, ticks: { precision: 0 } } },
+        plugins: { legend: { display: false } }
+      }
+    });
+  }
+</script>
+{% endif %}
+</body>
+</html>
